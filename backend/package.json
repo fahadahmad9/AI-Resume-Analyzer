@@ -18,7 +18,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.4",
     "multer": "^2.0.2",
-    "pdf-parse": "^2.4.5"
+    "pdf2json": "^4.0.3",
+    "pdfjs-dist": "^4.10.38"
   },
   "devDependencies": {
     "nodemon": "^3.1.11"
