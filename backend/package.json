@@ -4,7 +4,11 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "db:migrate": "node db/migrate.js",
+    "db:test": "node db/test.js",
+    "rag:test": "node rag/test-ingest.js",
+    "rag:retrieve": "node rag/test-retrieve.js"
   },
   "keywords": [],
   "author": "",
@@ -19,7 +23,9 @@
     "mongoose": "^9.1.4",
     "multer": "^2.0.2",
     "pdf2json": "^4.0.3",
-    "pdfjs-dist": "^4.10.38"
+    "pdfjs-dist": "^4.10.38",
+    "pg": "^8.23.1",
+    "pgvector": "^0.3.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.11"

@@ -4,6 +4,7 @@ const PDFParser = require('pdf2json');
 const { applyContextualScore, parseResumeText } = require('../utils/resumeParser');
 const { extractEmbeddedPdfLinks } = require('../utils/pdfLinks');
 const { analyzeResumeWithGemini, GeminiAnalysisError } = require('../services/geminiService');
+const { ingestResume } = require('../../rag/ingest');
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -61,10 +62,20 @@ router.post('/parse', upload.single('resume'), async (req, res) => {
     let structuredResume = parseResumeText(extractedText, embeddedLinks);
     let aiAnalysis = null;
     let aiAnalysisError = null;
+    let resumeId = null;
 
     try {
       aiAnalysis = await analyzeResumeWithGemini(structuredResume);
       structuredResume = applyContextualScore(structuredResume, aiAnalysis);
+      try {
+        ({ resumeId } = await ingestResume({
+          filename: req.file.originalname,
+          rawText: extractedText,
+          parsed: structuredResume,
+        }));
+      } catch (error) {
+        console.error('Resume RAG ingestion failed:', error);
+      }
     } catch (error) {
       if (error instanceof GeminiAnalysisError) {
         aiAnalysisError = error.message;
@@ -88,6 +99,7 @@ router.post('/parse', upload.single('resume'), async (req, res) => {
 
     return res.json({
       message: 'Resume parsed successfully.',
+      resumeId,
       fileName: req.file.originalname,
       pageCount,
       structured: structuredResume,
