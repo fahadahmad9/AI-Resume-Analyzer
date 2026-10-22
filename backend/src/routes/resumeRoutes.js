@@ -5,6 +5,8 @@ const { applyContextualScore, parseResumeText } = require('../utils/resumeParser
 const { extractEmbeddedPdfLinks } = require('../utils/pdfLinks');
 const { analyzeResumeWithGemini, GeminiAnalysisError } = require('../services/geminiService');
 const { ingestResume } = require('../../rag/ingest');
+const { matchResumeToJob } = require('../../rag/matcher');
+const pool = require('../../db/pool');
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -113,6 +115,30 @@ router.post('/parse', upload.single('resume'), async (req, res) => {
     return res.status(500).json({
       message: error.message || 'Failed to parse resume PDF.',
     });
+  }
+});
+
+router.post('/:id/match', async (req, res) => {
+  const resumeId = Number(req.params.id);
+  const { jobDescription } = req.body || {};
+
+  if (!Number.isInteger(resumeId) || resumeId < 1) {
+    return res.status(400).json({ message: 'A valid resume id is required.' });
+  }
+  if (typeof jobDescription !== 'string' || jobDescription.trim().length < 50) {
+    return res.status(400).json({ message: 'jobDescription must be at least 50 characters.' });
+  }
+
+  try {
+    const resume = await pool.query('SELECT id FROM resumes WHERE id = $1', [resumeId]);
+    if (resume.rowCount === 0) {
+      return res.status(404).json({ message: 'Resume not found.' });
+    }
+
+    return res.json(await matchResumeToJob(resumeId, jobDescription.trim()));
+  } catch (error) {
+    console.error('Resume job match failed:', error);
+    return res.status(500).json({ message: 'Failed to match resume to job description.' });
   }
 });
 

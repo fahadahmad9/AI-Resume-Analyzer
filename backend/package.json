@@ -8,7 +8,8 @@
     "db:migrate": "node db/migrate.js",
     "db:test": "node db/test.js",
     "rag:test": "node rag/test-ingest.js",
-    "rag:retrieve": "node rag/test-retrieve.js"
+    "rag:retrieve": "node rag/test-retrieve.js",
+    "rag:match": "node rag/test-match.js"
   },
   "keywords": [],
   "author": "",

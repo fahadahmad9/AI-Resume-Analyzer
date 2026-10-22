@@ -186,6 +186,7 @@ async function analyzeResumeWithGemini(structuredResume) {
 }
 
 module.exports = {
+  ai,
   testGemini,
   analyzeResumeWithGemini,
   buildResumeAnalysisPrompt,
