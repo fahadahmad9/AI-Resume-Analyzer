@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import axios from 'axios'
+import MatchResults from '../components/MatchResults'
+import { matchResume } from '../services/api'
 
 const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
@@ -23,6 +25,11 @@ function UploadPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [parsedResume, setParsedResume] = useState(null)
+  const [resumeId, setResumeId] = useState(null)
+  const [jobDescription, setJobDescription] = useState('')
+  const [matchResults, setMatchResults] = useState(null)
+  const [isMatching, setIsMatching] = useState(false)
+  const [matchError, setMatchError] = useState('')
 
   const fileInfo = useMemo(() => {
     if (!selectedFile) return 'No file selected'
@@ -58,6 +65,10 @@ function UploadPage() {
     setSelectedFile(file)
     setErrorMessage('')
     setParsedResume(null)
+    setResumeId(null)
+    setJobDescription('')
+    setMatchResults(null)
+    setMatchError('')
   }
 
   const handleUpload = async () => {
@@ -74,9 +85,15 @@ function UploadPage() {
     try {
       const response = await axios.post(`${apiBaseUrl}/api/resume/parse`, formData)
       setParsedResume(response.data)
+      setResumeId(response.data.resumeId ?? null)
+      setJobDescription('')
+      setMatchResults(null)
+      setMatchError('')
     } 
     catch (error) {
       setParsedResume(null)
+      setResumeId(null)
+      setMatchResults(null)
       setErrorMessage(
         error.response?.data?.message || 'Failed to upload and parse the resume.',
       )
@@ -84,6 +101,42 @@ function UploadPage() {
     finally {
       setIsUploading(false)
     }
+  }
+
+  const handleMatch = async (event) => {
+    event.preventDefault()
+
+    if (!resumeId || jobDescription.trim().length < 50 || isMatching) {
+      return
+    }
+
+    setIsMatching(true)
+    setMatchError('')
+
+    try {
+      const results = await matchResume(resumeId, jobDescription.trim())
+      setMatchResults(results)
+    } catch (error) {
+      const status = error.response?.status
+      const messageByStatus = {
+        400: 'Please enter a job description with at least 50 characters.',
+        404: 'This resume is no longer available. Please upload it again.',
+        500: 'The comparison service could not complete the request. Please try again.',
+      }
+
+      setMatchResults(null)
+      setMatchError(
+        messageByStatus[status] || 'Unable to compare the resume. Check your connection and try again.',
+      )
+    } finally {
+      setIsMatching(false)
+    }
+  }
+
+  const handleCompareAnother = () => {
+    setJobDescription('')
+    setMatchResults(null)
+    setMatchError('')
   }
 
   return (
@@ -381,6 +434,47 @@ function UploadPage() {
               <summary>Raw extracted text</summary>
               <pre>{parsedResume.preview}</pre>
             </details>
+
+            <section className="match-section">
+              <h2>Compare with a job description</h2>
+              {resumeId === null ? (
+                <p className="resume-empty">
+                  Comparison is unavailable for this upload because the resume could not be indexed.
+                </p>
+              ) : matchResults ? (
+                <MatchResults
+                  results={matchResults}
+                  onCompareAnother={handleCompareAnother}
+                />
+              ) : (
+                <form className="match-form" onSubmit={handleMatch}>
+                  <label htmlFor="job-description">
+                    Paste a job description
+                    <textarea
+                      id="job-description"
+                      value={jobDescription}
+                      onChange={(event) => setJobDescription(event.target.value)}
+                      rows={8}
+                      placeholder="Paste at least 50 characters from the job description..."
+                    />
+                  </label>
+                  <div className="match-form-footer">
+                    <span className="match-character-count">
+                      {jobDescription.length} characters
+                    </span>
+                    <button
+                      type="submit"
+                      className="upload-button match-button"
+                      disabled={jobDescription.trim().length < 50 || isMatching}
+                    >
+                      {isMatching ? 'Comparing...' : 'Compare'}
+                    </button>
+                  </div>
+                  {isMatching ? <p className="match-loading">Comparing your resume with the job description...</p> : null}
+                  {matchError ? <p className="upload-error match-error">{matchError}</p> : null}
+                </form>
+              )}
+            </section>
           </div>
         ) : null}
       </section>
