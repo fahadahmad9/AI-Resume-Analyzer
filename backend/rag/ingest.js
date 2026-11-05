@@ -3,11 +3,19 @@ const { chunkResume } = require('./chunker');
 const { embedTexts } = require('./embedder');
 
 async function ingestResume({ filename, rawText, parsed }) {
+  const startedAt = Date.now();
+  const chunkStartedAt = Date.now();
   const chunks = chunkResume(parsed);
+  console.log(`[timing] ingestion chunk ms=${Date.now() - chunkStartedAt}`);
+
+  const embedStartedAt = Date.now();
   const embeddings = await embedTexts(chunks.map((chunk) => chunk.content));
+  console.log(`[timing] ingestion embed ms=${Date.now() - embedStartedAt}`);
+
   const client = await pool.connect();
 
   try {
+    const insertStartedAt = Date.now();
     await client.query('BEGIN');
     const resume = await client.query(
       `INSERT INTO resumes (filename, raw_text, parsed)
@@ -25,6 +33,8 @@ async function ingestResume({ filename, rawText, parsed }) {
       );
     }
     await client.query('COMMIT');
+    console.log(`[timing] ingestion insert ms=${Date.now() - insertStartedAt}`);
+    console.log(`[timing] ingestion total ms=${Date.now() - startedAt}`);
     return { resumeId, chunkCount: chunks.length };
   } catch (error) {
     await client.query('ROLLBACK');

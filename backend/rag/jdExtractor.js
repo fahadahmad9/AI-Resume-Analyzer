@@ -1,6 +1,4 @@
-const { ai } = require('../src/services/geminiService');
-
-const MODEL = 'gemini-3.7-flash';
+const { generateWithFallback } = require('../src/services/geminiClient');
 const CATEGORIES = new Set(['skill', 'experience', 'education', 'other']);
 const IMPORTANCE = new Set(['must', 'nice']);
 
@@ -11,8 +9,8 @@ function parseJson(text) {
 }
 
 function extractRequirements(jobDescription) {
-  return ai.models.generateContent({
-    model: MODEL,
+  return generateWithFallback((model) => ({
+    model,
     contents: [
       'Extract up to 25 short, atomic job requirements from this job description.',
       'Use exact technologies, concise experience requirements, education, or other qualifications.',
@@ -34,7 +32,7 @@ function extractRequirements(jobDescription) {
         },
       },
     },
-  }).then((response) => {
+  })).then(({ response }) => {
     const parsed = parseJson(response.text);
     if (!Array.isArray(parsed) || parsed.length > 25) {
       throw new Error('Gemini returned invalid job requirements');

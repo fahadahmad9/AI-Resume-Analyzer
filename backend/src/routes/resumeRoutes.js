@@ -48,6 +48,7 @@ function extractTextFromPDF(buffer) {
 }
 
 router.post('/parse', upload.single('resume'), async (req, res) => {
+  const requestStartedAt = Date.now();
   try {
     if (!req.file) {
       return res.status(400).json({ message: 'Resume PDF is required.' });
@@ -57,28 +58,34 @@ router.post('/parse', upload.single('resume'), async (req, res) => {
       return res.status(400).json({ message: 'Only PDF files are supported.' });
     }
 
+    const extractionStartedAt = Date.now();
     const [{ text: extractedText, pageCount }, embeddedLinks] = await Promise.all([
       extractTextFromPDF(req.file.buffer),
       extractEmbeddedPdfLinks(req.file.buffer),
     ]);
+    console.log(`[timing] PDF extraction ms=${Date.now() - extractionStartedAt}`);
+
+    const parsingStartedAt = Date.now();
     let structuredResume = parseResumeText(extractedText, embeddedLinks);
+    console.log(`[timing] parsing/scoring ms=${Date.now() - parsingStartedAt}`);
     let aiAnalysis = null;
     let aiAnalysisError = null;
     let resumeId = null;
 
-    try {
-      aiAnalysis = await analyzeResumeWithGemini(structuredResume);
+    const [analysisResult, ingestionResult] = await Promise.allSettled([
+      analyzeResumeWithGemini(structuredResume),
+      ingestResume({
+        filename: req.file.originalname,
+        rawText: extractedText,
+        parsed: structuredResume,
+      }),
+    ]);
+
+    if (analysisResult.status === 'fulfilled') {
+      aiAnalysis = analysisResult.value;
       structuredResume = applyContextualScore(structuredResume, aiAnalysis);
-      try {
-        ({ resumeId } = await ingestResume({
-          filename: req.file.originalname,
-          rawText: extractedText,
-          parsed: structuredResume,
-        }));
-      } catch (error) {
-        console.error('Resume RAG ingestion failed:', error);
-      }
-    } catch (error) {
+    } else {
+      const error = analysisResult.reason;
       if (error instanceof GeminiAnalysisError) {
         aiAnalysisError = error.message;
         console.warn('Gemini resume analysis unavailable after retries.');
@@ -86,6 +93,12 @@ router.post('/parse', upload.single('resume'), async (req, res) => {
         console.error('Gemini resume analysis failed:', error.message);
         aiAnalysisError = 'AI analysis failed. The resume was parsed successfully.';
       }
+    }
+
+    if (ingestionResult.status === 'fulfilled') {
+      ({ resumeId } = ingestionResult.value);
+    } else {
+      console.error(`[ingest] failed ${ingestionResult.reason?.message || ingestionResult.reason}`);
     }
 
     // DEBUG
@@ -98,6 +111,7 @@ router.post('/parse', upload.single('resume'), async (req, res) => {
         console.log(`\n[Experience Entry ${i + 1}]:\n${entry}`);
     });
     console.log('======================\n');
+    console.log(`[timing] total request ms=${Date.now() - requestStartedAt}`);
 
     return res.json({
       message: 'Resume parsed successfully.',

@@ -1,11 +1,4 @@
-const { GoogleGenAI } = require('@google/genai');
-
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY
-});
-
-const MAX_GEMINI_ATTEMPTS = 4;
-const INITIAL_RETRY_DELAY_MS = 1000;
+const { ai, generateWithFallback } = require('./geminiClient');
 
 class GeminiAnalysisError extends Error {
   constructor(message = 'AI analysis is temporarily unavailable. Please try again later.') {
@@ -16,44 +9,10 @@ class GeminiAnalysisError extends Error {
   }
 }
 
-function getGeminiErrorStatus(error) {
-  const status = error?.status ?? error?.statusCode ?? error?.response?.status ?? error?.error?.code;
-  if (Number(status)) return Number(status);
-  if (/^UNAVAILABLE$/i.test(String(status))) return 503;
-  if (/^(?:RESOURCE_EXHAUSTED|TOO_MANY_REQUESTS)$/i.test(String(status))) return 429;
-
-  const message = String(error?.message || error || '');
-  if (/\b503\b|\bUNAVAILABLE\b/i.test(message)) return 503;
-  if (/\b429\b|\bRESOURCE_EXHAUSTED\b|rate limit/i.test(message)) return 429;
-  return null;
-}
-
-function isTransientGeminiError(error) {
-  const status = getGeminiErrorStatus(error);
-  return status === 503 || status === 429;
-}
-
-function getRetryAfterMs(error) {
-  const retryAfter = error?.headers?.['retry-after']
-    ?? error?.headers?.get?.('retry-after')
-    ?? error?.response?.headers?.['retry-after'];
-  if (!retryAfter) return null;
-
-  const seconds = Number(retryAfter);
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : null;
-}
-
-function getGeminiErrorMetadata(error) {
-  return {
-    name: error?.name,
-    status: getGeminiErrorStatus(error),
-    message: String(error?.message || error || ''),
-  };
-}
-
+// Kept for callers of the legacy test helper; production generation uses the fallback client.
 async function generateContentWithRetry(generateContent, options = {}) {
-  const maxAttempts = options.maxAttempts || MAX_GEMINI_ATTEMPTS;
-  const initialDelayMs = options.initialDelayMs ?? INITIAL_RETRY_DELAY_MS;
+  const maxAttempts = options.maxAttempts || 4;
+  const initialDelayMs = options.initialDelayMs ?? 1000;
   const sleep = options.sleep || ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
   const logger = options.logger || console;
 
@@ -61,29 +20,25 @@ async function generateContentWithRetry(generateContent, options = {}) {
     try {
       return await generateContent();
     } catch (error) {
-      if (!isTransientGeminiError(error) || attempt === maxAttempts) {
-        if (isTransientGeminiError(error)) {
-          logger.error?.('Gemini request failed after retries.', getGeminiErrorMetadata(error));
-          throw new GeminiAnalysisError();
-        }
+      const status = Number(error?.status ?? error?.statusCode);
+      const transient = status === 429 || status === 503;
+      if (!transient || attempt === maxAttempts) {
+        if (transient && attempt === maxAttempts) throw new GeminiAnalysisError();
         throw error;
       }
-
-      const status = getGeminiErrorStatus(error);
-      const delayMs = getRetryAfterMs(error) ?? initialDelayMs * (2 ** (attempt - 1));
-      logger.warn(`Gemini request failed with ${status}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxAttempts})...`);
+      const delayMs = initialDelayMs * (2 ** (attempt - 1));
+      logger.warn?.(`Gemini request failed with ${status}. Retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxAttempts})...`);
       await sleep(delayMs);
     }
   }
-
   throw new GeminiAnalysisError();
 }
 
 async function testGemini() {
-  const response = await generateContentWithRetry(() => ai.models.generateContent({
-      model: 'gemini-3.7-flash',
-      contents: 'Say hello to my AI Resume Analyzer in one short sentence.'
-    }));
+  const { response } = await generateWithFallback((model) => ({
+    model,
+    contents: 'Say hello to my AI Resume Analyzer in one short sentence.',
+  }));
 
   return response.text;
 }
@@ -168,12 +123,18 @@ async function analyzeResumeWithGemini(structuredResume) {
 
   const prompt = buildResumeAnalysisPrompt(structuredResume);
 
-  const response = await generateContentWithRetry(() => ai.models.generateContent({
-      model: 'gemini-3.7-flash',
+  const startedAt = Date.now();
+  let result;
+  try {
+    result = await generateWithFallback((model) => ({
+      model,
       contents: prompt,
     }));
-
-  const text = response.text || '';
+  } catch (error) {
+    throw new GeminiAnalysisError();
+  }
+  console.log(`[timing] Gemini analysis model=${result.model} ms=${Date.now() - startedAt}`);
+  const text = result.response.text || '';
   const parsed = extractJsonFromText(text);
 
   if (parsed) {
@@ -192,4 +153,5 @@ module.exports = {
   buildResumeAnalysisPrompt,
   GeminiAnalysisError,
   generateContentWithRetry,
+  generateWithFallback,
 };
