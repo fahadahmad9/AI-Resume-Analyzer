@@ -76,60 +76,6 @@ AI-Resume-Analyzer/
         └── services/api.js
 ```
 
-## Getting started
-
-### Prerequisites
-
-- Node.js 20+
-- Docker
-- A Gemini API key from [Google AI Studio](https://aistudio.google.com/)
-
-### 1. Start PostgreSQL with pgvector
-
-```bash
-docker run --name resume-pg \
-  -e POSTGRES_PASSWORD=<your-password> \
-  -e POSTGRES_DB=resume_analyzer \
-  -p 5432:5432 \
-  -d pgvector/pgvector:pg16
-```
-
-On later sessions, `docker start resume-pg` is enough.
-
-### 2. Configure the backend
-
-Create `backend/.env` (never commit it):
-
-```env
-GEMINI_API_KEY=your_key_here
-DATABASE_URL=postgres://postgres:<your-password>@localhost:5432/resume_analyzer
-
-# Optional: model selection with fallbacks, tried in order on 429/503
-GEMINI_MODEL=gemini-3.6-flash
-GEMINI_FALLBACK_MODELS=gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite
-```
-
-See `backend/.env.example` for the full list.
-
-### 3. Install, migrate, run
-
-```bash
-cd backend
-npm install
-npm run db:migrate    # creates the vector extension, tables and index
-npm start             # http://localhost:5000
-```
-
-In a second terminal:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open the URL Vite prints (usually `http://localhost:5173`).
-
 ## API
 
 ### `POST /api/resume/parse`
