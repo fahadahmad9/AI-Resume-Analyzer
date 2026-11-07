@@ -1,0 +1,19 @@
+﻿Job Description - Entry-Level Software Engineer
+
+We are looking for an entry-level Software Engineer with a Bachelor's degree in Computer Science, Software Engineering, or a related field.
+
+Required qualifications
+- Bachelor's degree in Computer Science or a related field.
+- Knowledge of Python, JavaScript, or another programming language.
+- Understanding of object-oriented programming and data structures.
+- Basic knowledge of SQL and relational databases.
+- Familiarity with Git and version control.
+- Experience or academic exposure to REST APIs.
+- Strong problem-solving and communication skills.
+
+Preferred qualifications
+- Experience with React or Node.js.
+- Familiarity with PostgreSQL or MongoDB.
+- Exposure to Docker.
+- Basic knowledge of cloud platforms such as Google Cloud or AWS.
+- Familiarity with FastAPI or Django.

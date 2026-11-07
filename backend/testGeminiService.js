@@ -17,8 +17,7 @@ async function runTest() {
       contents: 'Say hello in one short sentence.'
     });
 
-    console.log('Gemini responded:');
-    console.log(response.text);
+    console.log('Gemini responded successfully.');
   } catch (error) {
     console.error('Gemini error:', error);
   }

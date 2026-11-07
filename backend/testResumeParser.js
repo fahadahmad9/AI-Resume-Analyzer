@@ -3,6 +3,7 @@ const test = require('node:test')
 
 const { parseResumeText } = require('./src/utils/resumeParser')
 const { extractEmbeddedPdfLinks } = require('./src/utils/pdfLinks')
+const { chunkResume } = require('./rag/chunker')
 
 function createPdfWithLinks(urls) {
   const objects = [
@@ -34,6 +35,146 @@ function socialLinks(text, embeddedUrls = []) {
 function skillsFromLines(lines) {
   return parseResumeText(['Skills', ...lines].join('\n')).skills
 }
+
+test('separates adjacent known skills without concatenating them', () => {
+  assert.deepEqual(skillsFromLines(['PythonJavaScriptSQL']), ['Python', 'JavaScript', 'SQL'])
+})
+
+test('keeps explicit categories and avoids cross-category duplication', () => {
+  const parsed = parseResumeText([
+    'Skills',
+    'Programming Languages: Python, JavaScript',
+    'Laboratory Methods: X-ray diffraction, spectroscopy',
+  ].join('\n'))
+
+  assert.deepEqual(parsed.skillCategories['Programming Languages'], ['Python', 'JavaScript'])
+  assert.deepEqual(parsed.skillCategories['Laboratory Methods'], ['X-ray diffraction', 'Spectroscopy'])
+  assert.equal(parsed.skills.filter((skill) => skill === 'Python').length, 1)
+})
+
+test('preserves unfamiliar domain skills and learning labels', () => {
+  const parsed = parseResumeText([
+    'Skills',
+    'Currently Learning: Polymer electrolyte synthesis, market segmentation',
+  ].join('\n'))
+
+  assert.ok(parsed.skills.includes('Polymer electrolyte synthesis'))
+  assert.ok(parsed.skills.includes('market segmentation'))
+  assert.ok(parsed.skillCategories['Currently Learning'])
+})
+
+test('extracts recognized skills from project descriptions without a Skills section', () => {
+  const parsed = parseResumeText([
+    'Projects',
+    'Built a data pipeline with Python and PostgreSQL.',
+  ].join('\n'))
+
+  assert.ok(parsed.skills.includes('Python'))
+  assert.ok(parsed.skills.includes('PostgreSQL'))
+})
+
+test('tracks provenance across six professional domains', () => {
+  const cases = [
+    ['Software Engineering', 'Projects\nBuilt a compiler with dependency graph analysis.', 'dependency graph analysis', 'project'],
+    ['Material Science', 'Experience\nConducted interfacial fracture characterization.', 'interfacial fracture characterization', 'experience'],
+    ['Healthcare', 'Projects\nImplemented patient reported outcome tracking.', 'patient reported outcome tracking', 'project'],
+    ['Finance', 'Experience\nPerformed stochastic credit modeling.', 'stochastic credit modeling', 'experience'],
+    ['Mechanical Engineering', 'Projects\nDeveloped thermoelastic fatigue prediction.', 'thermoelastic fatigue prediction', 'project'],
+    ['Marketing', 'Experience\nApplied behavioral cohort segmentation.', 'behavioral cohort segmentation', 'experience'],
+  ]
+
+  for (const [, text, skill, source] of cases) {
+    const parsed = parseResumeText(text)
+    assert.ok(parsed.skills.includes(skill), `missing ${skill}`)
+    assert.deepEqual(parsed.skillProvenance[skill].map((record) => record.source), [source])
+    assert.equal(parsed.skillProvenance[skill][0].section, source === 'project' ? 'projects' : 'experience')
+    assert.match(parsed.skillProvenance[skill][0].text, new RegExp(skill))
+  }
+})
+
+test('recognizes varied practical-experience phrasing without passive mentions', () => {
+  const cases = [
+    ['Responsible for compiler architecture.', 'compiler architecture'],
+    ['Specialized in interfacial fracture characterization.', 'interfacial fracture characterization'],
+    ['Accountable for patient outcome tracking.', 'patient outcome tracking'],
+    ['Focused on stochastic credit modeling.', 'stochastic credit modeling'],
+    ['Led work on thermoelastic fatigue prediction.', 'thermoelastic fatigue prediction'],
+    ['Owned behavioral cohort segmentation.', 'behavioral cohort segmentation'],
+  ]
+
+  for (const [line, skill] of cases) {
+    const parsed = parseResumeText(`Experience\n${line}`)
+    assert.ok(parsed.skills.includes(skill), `missing ${skill}`)
+    assert.equal(parsed.skillProvenance[skill][0].source, 'experience')
+  }
+
+  const passive = parseResumeText([
+    'Projects',
+    'The documentation mentioned spectral deconvolution.',
+    'Experience',
+    'Knowledge of clinical pathway design was preferred.',
+  ].join('\n'))
+  assert.deepEqual(passive.skills, [])
+  assert.deepEqual(passive.skillProvenance, {})
+})
+
+test('retains all origins for duplicate skills and distinguishes learning', () => {
+  const parsed = parseResumeText([
+    'Skills',
+    'Methods: Python',
+    'Currently Learning: quantum process tomography',
+    'Projects',
+    'Used Python and quantum process tomography.',
+    'Experience',
+    'Responsible for Python and quantum process tomography.',
+  ].join('\n'))
+
+  assert.deepEqual(parsed.skillProvenance.Python.map((record) => record.source), [
+    'explicit_skill',
+    'project',
+    'experience',
+  ])
+  assert.deepEqual(parsed.skillProvenance['quantum process tomography'].map((record) => record.source), [
+    'currently_learning',
+    'project',
+    'experience',
+  ])
+})
+
+test('does not classify a non-usage mention as practical evidence', () => {
+  const parsed = parseResumeText([
+    'Projects',
+    'The report mentioned spectral deconvolution and phase field modeling.',
+  ].join('\n'))
+
+  assert.deepEqual(parsed.skills, [])
+  assert.deepEqual(parsed.skillProvenance, {})
+})
+
+test('does not arbitrarily split unfamiliar compound words', () => {
+  const parsed = parseResumeText([
+    'Skills',
+    'Methods: electrochemicalimpedancespectroscopy',
+  ].join('\n'))
+
+  assert.deepEqual(parsed.skills, ['electrochemicalimpedancespectroscopy'])
+})
+
+test('keeps provenance metadata out of RAG evidence while preserving API fields', () => {
+  const parsed = parseResumeText([
+    'Skills',
+    'Methods: Python',
+    'Projects',
+    'Used Python for automation.',
+  ].join('\n'))
+  const chunks = chunkResume(parsed)
+
+  assert.ok(Array.isArray(parsed.skills))
+  assert.equal(typeof parsed.skillCategories, 'object')
+  assert.equal(typeof parsed.skillProvenance, 'object')
+  assert.ok(chunks.every((chunk) => !chunk.content.includes('explicit_skill')))
+  assert.ok(chunks.some((chunk) => chunk.content.includes('Python')))
+})
 
 test('preserves parenthesized skill groups', () => {
   assert.deepEqual(skillsFromLines([

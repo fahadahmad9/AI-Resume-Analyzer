@@ -1,485 +1,67 @@
-import { useMemo, useState } from 'react'
-import axios from 'axios'
-import MatchResults from '../components/MatchResults'
-import { matchResume } from '../services/api'
+import { useEffect, useRef, useState } from 'react'
+import { FileText, UploadCloud, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import Button from '../components/ui/Button'
+import Card from '../components/ui/Card'
+import ErrorBanner from '../components/ui/ErrorBanner'
+import Spinner from '../components/ui/Spinner'
+import { useResume } from '../context/useResume'
 
-const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000'
-
-function formatSectionStatus(status) {
-  switch (status) {
-    case 'present':
-      return 'Present'
-    case 'missing_relevant':
-      return 'Relevant section missing'
-    case 'optional':
-      return 'Optional'
-    case 'not_applicable':
-      return 'Not applicable'
-    default:
-      return status || 'Unspecified'
-  }
+function formatFileSize(size) {
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`
 }
 
 function UploadPage() {
+  const { file: analyzedFile, status, error, analyze, reset } = useResume()
   const [selectedFile, setSelectedFile] = useState(null)
-  const [isUploading, setIsUploading] = useState(false)
-  const [errorMessage, setErrorMessage] = useState('')
-  const [parsedResume, setParsedResume] = useState(null)
-  const [resumeId, setResumeId] = useState(null)
-  const [jobDescription, setJobDescription] = useState('')
-  const [matchResults, setMatchResults] = useState(null)
-  const [isMatching, setIsMatching] = useState(false)
-  const [matchError, setMatchError] = useState('')
+  const [validationError, setValidationError] = useState('')
+  const [elapsed, setElapsed] = useState(0)
+  const inputRef = useRef(null)
+  const navigate = useNavigate()
 
-  const fileInfo = useMemo(() => {
-    if (!selectedFile) return 'No file selected'
-    const sizeInMb = (selectedFile.size / (1024 * 1024)).toFixed(2)
-    return `${selectedFile.name} (${sizeInMb} MB)`
-  }, [selectedFile])
+  useEffect(() => {
+    if (status !== 'analyzing') return undefined
+    const started = Date.now()
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => window.clearInterval(timer)
+  }, [status])
 
-  const structuredResume = parsedResume?.structured || null
-  const scoreBreakdown = structuredResume?.score?.breakdown || null
-  const scoreStrengths = structuredResume?.score?.strengths || []
-  const scoreWeaknesses = structuredResume?.score?.weaknesses || []
-  const aiAnalysis = parsedResume?.aiAnalysis || null
-  const sectionAnalysis = aiAnalysis?.sectionAnalysis || null
-  const aiQualitySections = Object.entries(aiAnalysis?.qualityDimensions || {})
-    .filter(([, section]) => section && typeof section.score === 'number')
-    .map(([key, section]) => [key.replace(/([A-Z])/g, ' $1').trim(), section])
-
-  const handleFileChange = (event) => {
-    const [file] = event.target.files || []
-
-    if (!file) {
-      setSelectedFile(null)
+  const selectFile = (nextFile) => {
+    if (!nextFile) return
+    if (nextFile.type !== 'application/pdf' && !nextFile.name.toLowerCase().endsWith('.pdf')) {
+      setValidationError('Please choose a PDF file. Other file types are not supported.')
       return
     }
-
-    if (file.type !== 'application/pdf') {
-      alert('Please upload a PDF file only.')
-      event.target.value = ''
-      setSelectedFile(null)
-      return
-    }
-
-    setSelectedFile(file)
-    setErrorMessage('')
-    setParsedResume(null)
-    setResumeId(null)
-    setJobDescription('')
-    setMatchResults(null)
-    setMatchError('')
+    setValidationError('')
+    setSelectedFile(nextFile)
   }
 
-  const handleUpload = async () => {
-    if (!selectedFile || isUploading) {
-      return
-    }
-
-    const formData = new FormData()
-    formData.append('resume', selectedFile)
-
-    setIsUploading(true)
-    setErrorMessage('')
-
-    try {
-      const response = await axios.post(`${apiBaseUrl}/api/resume/parse`, formData)
-      setParsedResume(response.data)
-      setResumeId(response.data.resumeId ?? null)
-      setJobDescription('')
-      setMatchResults(null)
-      setMatchError('')
-    } 
-    catch (error) {
-      setParsedResume(null)
-      setResumeId(null)
-      setMatchResults(null)
-      setErrorMessage(
-        error.response?.data?.message || 'Failed to upload and parse the resume.',
-      )
-    } 
-    finally {
-      setIsUploading(false)
-    }
+  const handleInput = (event) => {
+    selectFile(event.target.files?.[0])
+    event.target.value = ''
   }
 
-  const handleMatch = async (event) => {
+  const handleDrop = (event) => {
     event.preventDefault()
-
-    if (!resumeId || jobDescription.trim().length < 50 || isMatching) {
-      return
-    }
-
-    setIsMatching(true)
-    setMatchError('')
-
-    try {
-      const results = await matchResume(resumeId, jobDescription.trim())
-      setMatchResults(results)
-    } catch (error) {
-      const status = error.response?.status
-      const messageByStatus = {
-        400: 'Please enter a job description with at least 50 characters.',
-        404: 'This resume is no longer available. Please upload it again.',
-        500: 'The comparison service could not complete the request. Please try again.',
-      }
-
-      setMatchResults(null)
-      setMatchError(
-        messageByStatus[status] || 'Unable to compare the resume. Check your connection and try again.',
-      )
-    } finally {
-      setIsMatching(false)
-    }
+    selectFile(event.dataTransfer.files?.[0])
   }
 
-  const handleCompareAnother = () => {
-    setJobDescription('')
-    setMatchResults(null)
-    setMatchError('')
+  const handleAnalyze = async () => {
+    const fileToAnalyze = selectedFile || analyzedFile
+    if (!fileToAnalyze) return
+    const parsed = await analyze(fileToAnalyze)
+    if (parsed) navigate('/app/overview')
   }
 
-  return (
-    <main className="upload-page">
-      <section className="upload-card">
-        <h1>Upload Resume</h1>
-        <p>Select a PDF resume to begin analysis.</p>
+  if (status === 'analyzing') return <section className="loading-page"><Card className="loading-card"><Spinner label="Analyzing resume" /><h1>Analyzing your resume</h1><p>This can take up to a minute.</p><span className="elapsed-time">Elapsed: {elapsed}s</span></Card></section>
 
-        <label className="upload-input" htmlFor="resume-pdf">
-          <span>Choose Resume PDF</span>
-          <input
-            id="resume-pdf"
-            type="file"
-            accept="application/pdf"
-            onChange={handleFileChange}
-          />
-        </label>
-
-        <p className="upload-file-info">{fileInfo}</p>
-        <button
-          type="button"
-          className="upload-button"
-          disabled={!selectedFile || isUploading}
-          onClick={handleUpload}
-        >
-          {isUploading ? 'Parsing...' : 'Upload and Parse'}
-        </button>
-
-        {errorMessage ? <p className="upload-error">{errorMessage}</p> : null}
-
-        {parsedResume ? (
-          <div className="upload-result">
-            <div className="upload-result-header">
-              <div>
-                <h2>Parsed Resume</h2>
-                <p>{parsedResume.fileName}</p>
-              </div>
-              <div className="upload-page-count">
-                <span>Page count</span>
-                <strong>{parsedResume.pageCount ?? 'Unknown'}</strong>
-              </div>
-            </div>
-
-            {structuredResume ? (
-              <div className="resume-grid">
-                <section className="resume-panel resume-score-panel">
-                  <h3>Resume Score</h3>
-                  <div className="resume-score-total">
-                    <strong>{structuredResume.score?.total ?? 'N/A'}</strong>
-                    <span>/ {structuredResume.score?.maxScore ?? 100}</span>
-                  </div>
-
-                  {structuredResume.score?.interpretation ? (
-                    <p className="resume-score-interpretation">{structuredResume.score.interpretation}</p>
-                  ) : null}
-
-                  {scoreBreakdown ? (
-                    <div className="score-breakdown-list">
-                      {Object.entries(scoreBreakdown).map(([label, entry]) => (
-                        <div key={label} className="score-breakdown-item">
-                          <div className="score-breakdown-header">
-                            <span>{label.replace(/([A-Z])/g, ' $1').trim()}</span>
-                            <strong>
-                              {entry.score}/{entry.maxScore}
-                            </strong>
-                          </div>
-                          <div className="score-bar">
-                            <div
-                              className="score-bar-fill"
-                              style={{ width: `${(entry.score / entry.maxScore) * 100}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {structuredResume.score?.strengths?.length ? (
-                    <div className="score-notes">
-                      <h4>Strengths</h4>
-                      <ul className="resume-list">
-                        {scoreStrengths.map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-
-                  {structuredResume.score?.weaknesses?.length ? (
-                    <div className="score-notes">
-                      <h4>Weaknesses</h4>
-                      <ul className="resume-list">
-                        {scoreWeaknesses.map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </section>
-
-                {aiAnalysis ? (
-                  <section className="resume-panel resume-ai-analysis">
-                    <h3>AI Resume Analysis</h3>
-
-                    <div className="score-breakdown-list">
-                      {aiQualitySections.map(([label, section]) => (
-                        <div key={label} className="score-breakdown-item">
-                          <div className="score-breakdown-header">
-                            <span>{label}</span>
-                            <strong>{section?.score ?? 'N/A'}/100</strong>
-                          </div>
-                          {typeof section?.score === 'number' ? (
-                            <div className="score-bar">
-                              <div
-                                className="score-bar-fill"
-                                style={{ width: `${Math.max(0, Math.min(100, section.score))}%` }}
-                              />
-                            </div>
-                          ) : null}
-                          {section?.findings?.length ? (
-                            <ul className="resume-list">
-                              {section.findings.map((finding) => (
-                                <li key={finding}>{finding}</li>
-                              ))}
-                            </ul>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-
-                    {[
-                      ['Overall Strengths', aiAnalysis.overallStrengths],
-                      ['Overall Weaknesses', aiAnalysis.overallWeaknesses],
-                      ['Priority Improvements', aiAnalysis.priorityImprovements],
-                    ].map(([label, items]) => (
-                      <div key={label} className="score-notes">
-                        <h4>{label}</h4>
-                        {items?.length ? (
-                          <ul className="resume-list">
-                            {items.map((item) => <li key={item}>{item}</li>)}
-                          </ul>
-                        ) : (
-                          <p className="resume-empty">No items provided.</p>
-                        )}
-                      </div>
-                    ))}
-                  </section>
-                ) : null}
-
-                <section className="resume-panel resume-profile">
-                  <h3>Profile</h3>
-                  <div className="resume-detail-list">
-                    <div>
-                      <span>Name</span>
-                      <strong>{structuredResume.name || 'Not detected'}</strong>
-                    </div>
-                    <div>
-                      <span>Email</span>
-                      <strong>{structuredResume.email || 'Not detected'}</strong>
-                    </div>
-                    <div>
-                      <span>Phone</span>
-                      <strong>{structuredResume.phone || 'Not detected'}</strong>
-                    </div>
-                    <div>
-                      <span>LinkedIn</span>
-                      <strong>{structuredResume.socialLinks?.linkedin || 'Not detected'}</strong>
-                    </div>
-                    <div>
-                      <span>GitHub</span>
-                      <strong>{structuredResume.socialLinks?.github || 'Not detected'}</strong>
-                    </div>
-                    <div>
-                      <span>Detected Profiles</span>
-                      <strong>
-                        {(structuredResume.profiles?.linkedin?.length || 0) + (structuredResume.profiles?.github?.length || 0) > 0
-                          ? 'Yes'
-                          : 'Not detected'}
-                      </strong>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="resume-panel">
-                  <h3>Section Availability</h3>
-                  {sectionAnalysis?.sections?.length ? (
-                    <>
-                      <div className="section-analysis-context">
-                        {sectionAnalysis.domain ? (
-                          <div>
-                            <span>Domain</span>
-                            <strong>{sectionAnalysis.domain}</strong>
-                          </div>
-                        ) : null}
-                        {sectionAnalysis.resumePurpose ? (
-                          <div>
-                            <span>Resume purpose</span>
-                            <strong>{sectionAnalysis.resumePurpose}</strong>
-                          </div>
-                        ) : null}
-                      </div>
-                    <div className="section-availability-list">
-                      {sectionAnalysis.sections.map((section, index) => (
-                        <div key={`${section.name}-${index}`} className="section-availability-item">
-                          <div className="section-availability-details">
-                            <strong>{section.name || 'Unnamed section'}</strong>
-                            {section.reason ? <p>{section.reason}</p> : null}
-                          </div>
-                          <div className="section-availability-meta">
-                            <strong className={`section-badge section-badge-${section.status || 'unknown'}`}>
-                              {formatSectionStatus(section.status)}
-                            </strong>
-                            {section.relevance ? <span>Relevance: {section.relevance}</span> : null}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    </>
-                  ) : (
-                    <p className="resume-empty">Section relevance analysis is unavailable.</p>
-                  )}
-                </section>
-
-                <section className="resume-panel resume-skill-categories">
-                  <h3>Categorized Skills</h3>
-                  {structuredResume.skillCategories ? (
-                    <div className="skill-category-grid">
-                      {Object.entries(structuredResume.skillCategories)
-                        .filter(([, skills]) => Array.isArray(skills) && skills.length > 0)
-                        .map(([category, skills]) => (
-                        <div key={category} className="skill-category-card">
-                          <h4>{category}</h4>
-                          <div className="skill-tags">
-                            {skills.map((skill) => (
-                              <span key={`${category}-${skill}`} className="skill-tag">
-                                {skill}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        ))}
-                    </div>
-                  ) : (
-                    <p className="resume-empty">No categorized skills available.</p>
-                  )}
-                </section>
-
-                <section className="resume-panel">
-                  <h3>Summary</h3>
-                  <p className="resume-paragraph">{structuredResume.summary || 'No extracted summary content.'}</p>
-                </section>
-
-                <section className="resume-panel">
-                  <h3>Education</h3>
-                  {structuredResume.education?.length ? (
-                    <ul className="resume-list">
-                      {structuredResume.education.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="resume-empty">No extracted education content.</p>
-                  )}
-                </section>
-
-                <section className="resume-panel">
-                  <h3>Experience</h3>
-                  {structuredResume.experience?.length ? (
-                    <ul className="resume-list">
-                      {structuredResume.experience.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="resume-empty">No extracted experience content.</p>
-                  )}
-                </section>
-
-                <section className="resume-panel">
-                  <h3>Projects</h3>
-                  {structuredResume.projects?.length ? (
-                    <ul className="resume-list">
-                      {structuredResume.projects.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="resume-empty">No extracted project content.</p>
-                  )}
-                </section>
-              </div>
-            ) : null}
-
-            <details className="resume-raw">
-              <summary>Raw extracted text</summary>
-              <pre>{parsedResume.preview}</pre>
-            </details>
-
-            <section className="match-section">
-              <h2>Compare with a job description</h2>
-              {resumeId === null ? (
-                <p className="resume-empty">
-                  Comparison is unavailable for this upload because the resume could not be indexed.
-                </p>
-              ) : matchResults ? (
-                <MatchResults
-                  results={matchResults}
-                  onCompareAnother={handleCompareAnother}
-                />
-              ) : (
-                <form className="match-form" onSubmit={handleMatch}>
-                  <label htmlFor="job-description">
-                    Paste a job description
-                    <textarea
-                      id="job-description"
-                      value={jobDescription}
-                      onChange={(event) => setJobDescription(event.target.value)}
-                      rows={8}
-                      placeholder="Paste at least 50 characters from the job description..."
-                    />
-                  </label>
-                  <div className="match-form-footer">
-                    <span className="match-character-count">
-                      {jobDescription.length} characters
-                    </span>
-                    <button
-                      type="submit"
-                      className="upload-button match-button"
-                      disabled={jobDescription.trim().length < 50 || isMatching}
-                    >
-                      {isMatching ? 'Comparing...' : 'Compare'}
-                    </button>
-                  </div>
-                  {isMatching ? <p className="match-loading">Comparing your resume with the job description...</p> : null}
-                  {matchError ? <p className="upload-error match-error">{matchError}</p> : null}
-                </form>
-              )}
-            </section>
-          </div>
-        ) : null}
-      </section>
-    </main>
-  )
+  return <section className="upload-page"><div className="page-intro upload-intro"><span className="eyebrow">Start here</span><h1>Upload your resume</h1><p>Get a clear view of your strengths, opportunities, and job fit.</p></div><Card className="upload-card">
+    {!selectedFile && !analyzedFile ? <button className="drop-zone" type="button" onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}><UploadCloud size={30} /><strong>Drop your PDF here, or browse</strong><span>PDF files only · up to 5 MB</span><input ref={inputRef} type="file" accept="application/pdf" onChange={handleInput} aria-label="Choose resume PDF" /></button> : <div className="selected-file"><span className="file-icon"><FileText size={21} /></span><div><strong>{(selectedFile || analyzedFile).name}</strong><span>{formatFileSize((selectedFile || analyzedFile).size)}</span></div><button className="icon-button" type="button" aria-label="Remove selected resume" onClick={() => { setSelectedFile(null); reset() }}><X size={18} /></button></div>}
+    {validationError ? <ErrorBanner>{validationError}</ErrorBanner> : null}
+    {error ? <ErrorBanner onRetry={handleAnalyze}>{error}</ErrorBanner> : null}
+    <Button className="button-primary analyze-button" disabled={!(selectedFile || analyzedFile) || status === 'analyzing'} onClick={handleAnalyze}>Analyze resume</Button>
+    <p className="privacy-note">Resumes are processed with Google's Gemini API and deleted automatically after 24 hours.</p>
+  </Card></section>
 }
 
 export default UploadPage

@@ -14,7 +14,7 @@ const sample = {
 };
 
 async function runTest() {
-  const { resumeId } = await ingestResume({
+  const { internalId } = await ingestResume({
     filename: 'retrieve-test-resume.json',
     rawText: JSON.stringify(sample),
     parsed: sample,
@@ -22,10 +22,10 @@ async function runTest() {
 
   try {
     for (const query of ['Python PostgreSQL skills', 'medieval European history']) {
-      console.log(`Results for "${query}":`, await retrieveChunks(query, { resumeId, k: 3 }));
+      console.log(`Results for "${query}":`, await retrieveChunks(query, { resumeId: internalId, k: 3 }));
     }
   } finally {
-    await pool.query('DELETE FROM resumes WHERE id = $1', [resumeId]);
+    await pool.query('DELETE FROM resumes WHERE id = $1', [internalId]);
   }
 }
 

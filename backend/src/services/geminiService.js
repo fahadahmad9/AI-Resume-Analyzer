@@ -58,7 +58,7 @@ function extractJsonFromText(text) {
 }
 
 function buildResumeAnalysisPrompt(structuredResume) {
-  const { score, ...resumeContent } = structuredResume || {}
+  const { score, skillProvenance, ...resumeContent } = structuredResume || {}
   const analysisInput = {
     ...resumeContent,
     deterministicFacts: score?.deterministicFacts || {},

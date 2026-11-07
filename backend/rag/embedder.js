@@ -8,14 +8,17 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const MODEL = 'gemini-embedding-001';
 const BATCH_SIZE = 16;
 
-async function embedBatch(texts) {
+async function embedBatch(texts, taskType) {
   let lastError;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const response = await ai.models.embedContent({
         model: MODEL,
         contents: texts,
-        config: { outputDimensionality: 768 },
+        config: {
+          ...(taskType ? { taskType } : {}),
+          outputDimensionality: 768,
+        },
       });
       const embeddings = response.embeddings || [];
       if (embeddings.length !== texts.length) {
@@ -34,11 +37,11 @@ async function embedBatch(texts) {
   throw lastError;
 }
 
-async function embedTexts(texts) {
+async function embedTexts(texts, taskType) {
   if (!Array.isArray(texts)) throw new TypeError('texts must be an array');
   const embeddings = [];
   for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-    embeddings.push(...await embedBatch(texts.slice(i, i + BATCH_SIZE)));
+    embeddings.push(...await embedBatch(texts.slice(i, i + BATCH_SIZE), taskType));
   }
   return embeddings;
 }

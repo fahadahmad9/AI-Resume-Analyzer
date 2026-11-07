@@ -1,26 +1,35 @@
 require('dotenv').config();
 
-console.log(
-  'Gemini API key loaded:',
-  !!process.env.GEMINI_API_KEY
-);
-
-const { connectDB } = require('./src/config/db');
 const { createApp } = require('./src/app');
+const pool = require('./db/pool');
 
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5000;
+const retentionHours = Number(process.env.RETENTION_HOURS) || 24;
+
+async function deleteExpiredResumes() {
+  try {
+    const result = await pool.query(
+      `DELETE FROM resumes
+       WHERE created_at < NOW() - ($1 * INTERVAL '1 hour')`,
+      [retentionHours],
+    );
+    console.log(`[retention] deleted ${result.rowCount} resumes`);
+  } catch (error) {
+    console.error('[retention] cleanup failed:', error);
+  }
+}
 
 async function start() {
-  if (process.env.MONGO_URI) {
-    await connectDB();
-  } else {
-    console.warn('MONGO_URI is not set; starting without a database connection.');
-  }
-
   const app = createApp();
-  app.listen(PORT, () => {
+  await deleteExpiredResumes();
+  const cleanupTimer = setInterval(deleteExpiredResumes, 60 * 60 * 1000);
+  cleanupTimer.unref();
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
   });
 }
 
-start();
+start().catch((error) => {
+  console.error('Server startup failed:', error);
+  process.exitCode = 1;
+});

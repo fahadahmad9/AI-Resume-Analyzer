@@ -7,9 +7,33 @@ const { analyzeResumeWithGemini, GeminiAnalysisError } = require('../services/ge
 const { ingestResume } = require('../../rag/ingest');
 const { matchResumeToJob } = require('../../rag/matcher');
 const pool = require('../../db/pool');
+const rateLimit = require('express-rate-limit');
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, callback) => {
+    if (file.mimetype !== 'application/pdf') {
+      return callback(new Error('Only PDF files are supported.'));
+    }
+    return callback(null, true);
+  },
+});
+const rateWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000;
+const uploadRateLimit = rateLimit({
+  windowMs: rateWindowMs,
+  limit: Number(process.env.UPLOAD_RATE_LIMIT_MAX) || 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+});
+const matchRateLimit = rateLimit({
+  windowMs: rateWindowMs,
+  limit: Number(process.env.MATCH_RATE_LIMIT_MAX) || 30,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+});
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function cleanExtractedText(text) {
   return String(text || '')
@@ -47,7 +71,7 @@ function extractTextFromPDF(buffer) {
   });
 }
 
-router.post('/parse', upload.single('resume'), async (req, res) => {
+router.post('/parse', uploadRateLimit, upload.single('resume'), async (req, res) => {
   const requestStartedAt = Date.now();
   try {
     if (!req.file) {
@@ -101,16 +125,6 @@ router.post('/parse', upload.single('resume'), async (req, res) => {
       console.error(`[ingest] failed ${ingestionResult.reason?.message || ingestionResult.reason}`);
     }
 
-    // DEBUG
-    console.log('\n=== PROJECTS DEBUG ===');
-    structuredResume.projects?.forEach((entry, i) => {
-      console.log(`\n[Project Entry ${i + 1}]:\n${entry}`);
-    });
-    console.log('\n=== EXPERIENCE DEBUG ===');
-    structuredResume.experience?.forEach((entry, i) => {
-        console.log(`\n[Experience Entry ${i + 1}]:\n${entry}`);
-    });
-    console.log('======================\n');
     console.log(`[timing] total request ms=${Date.now() - requestStartedAt}`);
 
     return res.json({
@@ -132,24 +146,27 @@ router.post('/parse', upload.single('resume'), async (req, res) => {
   }
 });
 
-router.post('/:id/match', async (req, res) => {
-  const resumeId = Number(req.params.id);
+router.post('/:id/match', matchRateLimit, async (req, res) => {
+  const publicId = req.params.id;
   const { jobDescription } = req.body || {};
 
-  if (!Number.isInteger(resumeId) || resumeId < 1) {
-    return res.status(400).json({ message: 'A valid resume id is required.' });
+  if (!uuidPattern.test(publicId)) {
+    return res.status(404).json({ message: 'Resume not found.' });
   }
   if (typeof jobDescription !== 'string' || jobDescription.trim().length < 50) {
     return res.status(400).json({ message: 'jobDescription must be at least 50 characters.' });
   }
+  if (jobDescription.length > 15000) {
+    return res.status(400).json({ message: 'jobDescription must be 15000 characters or fewer.' });
+  }
 
   try {
-    const resume = await pool.query('SELECT id FROM resumes WHERE id = $1', [resumeId]);
+    const resume = await pool.query('SELECT id FROM resumes WHERE public_id = $1', [publicId]);
     if (resume.rowCount === 0) {
       return res.status(404).json({ message: 'Resume not found.' });
     }
 
-    return res.json(await matchResumeToJob(resumeId, jobDescription.trim()));
+    return res.json(await matchResumeToJob(resume.rows[0].id, jobDescription.trim()));
   } catch (error) {
     console.error('Resume job match failed:', error);
     return res.status(500).json({ message: 'Failed to match resume to job description.' });

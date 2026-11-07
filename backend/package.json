@@ -9,17 +9,26 @@
     "db:test": "node db/test.js",
     "rag:test": "node rag/test-ingest.js",
     "rag:retrieve": "node rag/test-retrieve.js",
-    "rag:match": "node rag/test-match.js"
+    "rag:match": "node rag/test-match.js",
+    "rag:reindex": "node rag/reindex.js",
+    "rag:coverage": "node rag/coverage.js",
+    "rag:match-id": "node rag/match-cli.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
+    "@google/genai": "^1.40.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.4",
     "multer": "^2.0.2",

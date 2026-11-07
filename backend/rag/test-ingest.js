@@ -30,11 +30,11 @@ async function runTest() {
        WHERE resume_id = $2
        ORDER BY embedding <=> $1::vector
        LIMIT 3`,
-      [`[${queryEmbedding.join(',')}]`, result.resumeId],
+      [`[${queryEmbedding.join(',')}]`, result.internalId],
     );
     console.log('Top matching chunks:', query.rows);
   } finally {
-    await pool.query('DELETE FROM resumes WHERE id = $1', [result.resumeId]);
+    await pool.query('DELETE FROM resumes WHERE id = $1', [result.internalId]);
   }
 }
 

@@ -27,21 +27,6 @@ const SECTION_DEFINITIONS = [
   },
 ]
 
-const SKILL_CATEGORIES = [
-  'Programming Languages',
-  'Frontend',
-  'Backend',
-  'Databases',
-  'Cloud & DevOps',
-  'AI / Machine Learning',
-  'Data Engineering',
-  'Software & Tools',
-  'Methods & Techniques',
-  'Domain Knowledge',
-  'Soft Skills',
-  'Languages',
-]
-
 const SKILL_DICTIONARY = [
   { synonyms: ['python'], canonical: 'Python', category: 'Programming Languages' },
   { synonyms: ['java'], canonical: 'Java', category: 'Programming Languages' },
@@ -247,19 +232,10 @@ function extractName(lines, email, phone) {
 }
 
 function splitIntoEntries(lines) {
-  console.log('\n--- splitIntoEntries input ---');
-  console.log('Line count:', lines.length);
-  lines.forEach((l, i) => console.log(`  [${i}]: ${l.substring(0, 80)}`));
-  console.log('-----------------------------\n');
-
   const hasBullets = lines.some(line => /^[•\-–—]/.test(line.trim()));
 
   if (!hasBullets) {
-    const result = lines.map(l => l.trim()).filter(Boolean);
-    console.log('\n--- splitIntoEntries output (no bullets) ---');
-    result.forEach((e, i) => console.log(`  [${i}]: ${e.substring(0, 80)}`));
-    console.log('-----------------------------\n');
-    return result;
+    return lines.map(l => l.trim()).filter(Boolean);
   }
 
   const isProjectTitle = (line) => {
@@ -318,24 +294,22 @@ function splitIntoEntries(lines) {
 
   if (current) rawEntries.push(current);
 
-  const entries = rawEntries.map(e => e.text.trim()).filter(Boolean);
-
-  console.log('\n--- splitIntoEntries output ---');
-  entries.forEach((e, i) => console.log(`  [${i}]: ${e.substring(0, 80)}`));
-  console.log('-----------------------------\n');
-
-  return entries;
+  return rawEntries.map(e => e.text.trim()).filter(Boolean);
 }
 
-function stripSkillLabel(line) {
+function splitSkillLabel(line) {
   const cleaned = line.replace(/^[•\-–—]\s*/, '').trim()
   const labelMatch = cleaned.match(/^([A-Za-z][A-Za-z0-9 &/+.-]{0,40})\s*:\s*(.+)$/)
 
   if (labelMatch && labelMatch[2].trim()) {
-    return labelMatch[2].trim()
+    return { category: labelMatch[1].trim(), value: labelMatch[2].trim() }
   }
 
-  return cleaned
+  return { category: 'Skills', value: cleaned }
+}
+
+function stripSkillLabel(line) {
+  return splitSkillLabel(line).value
 }
 
 function cleanEdgePunctuation(text) {
@@ -365,33 +339,6 @@ function normalizeSkillLabel(skill) {
   return trimmed.replace(/\bLLMs\b/i, 'LLM')
 }
 
-function getSkillCategory(skill) {
-  const skillDefinition = SKILL_DICTIONARY.find((definition) =>
-    definition.canonical.toLowerCase() === skill.toLowerCase()
-  )
-  if (skillDefinition) {
-    return skillDefinition.category
-  }
-
-  if (/\b(communication|presentation|leadership|collaboration|teamwork|problem solving|critical thinking|research|time management|adaptability)\b/i.test(skill)) {
-    return 'Soft Skills'
-  }
-
-  if (/\b(english|urdu|turkish|arabic|french|german|spanish)\b/i.test(skill)) {
-    return 'Languages'
-  }
-
-  if (/\b(material|polymer|resin|chemical|mechanical|electrical|financial|finance|marketing|healthcare|education|consumer behavior|consumer behaviour|optimization|optimisation|processing)\b/i.test(skill)) {
-    return 'Domain Knowledge'
-  }
-
-  if (/\b(characterization|chromatography|kinetics|microscopy|organic synthesis|preparation|spectroscopy|testing|technique|titration)\b/i.test(skill)) {
-    return 'Methods & Techniques'
-  }
-
-  return 'Software & Tools'
-}
-
 function isValidSkillCandidate(candidate) {
   const normalized = candidate.trim()
   const wordCount = normalized.split(/\s+/).length
@@ -407,13 +354,6 @@ function isValidSkillCandidate(candidate) {
   if (/^(?:ambassador|tutor|manager|engineer|developer|analyst|professor|intern|student|captain|coordinator)\b/i.test(normalized)) return false
 
   return true
-}
-
-function createEmptySkillCategories() {
-  return SKILL_CATEGORIES.reduce((categories, category) => {
-    categories[category] = []
-    return categories
-  }, {})
 }
 
 function splitSkillLine(line) {
@@ -440,59 +380,118 @@ function splitSkillLine(line) {
   }
 
   fragments.push(line.slice(start))
-  return fragments
+
+  const dictionaryTerms = SKILL_DICTIONARY
+    .flatMap((definition) => definition.synonyms)
+    .sort((left, right) => right.length - left.length)
+  const escapedTerms = dictionaryTerms
+    .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')
+
+  return fragments.flatMap((fragment) => {
+    const separated = fragment.replace(
+      new RegExp(`(${escapedTerms})(?=(${escapedTerms}))`, 'gi'),
+      '$1\u0000'
+    )
+    return separated.split('\u0000')
+  })
+}
+
+function addContextualSkills(sourceText, sourceType, section, addSkill) {
+  const usagePattern = /\b(?:used|using|applied|developed|implemented|built|created|conducted|performed|managed|analyzed|analysed|worked with|experience with|experience in|proficient in|responsible for|specialized in|specialised in|accountable for|focused on|led work on|owned|contributed to|supported|hands-on with|worked on)\s+([^.!?]+)/gi
+
+  for (const match of String(sourceText || '').matchAll(usagePattern)) {
+    const evidenceText = match[0].trim()
+    const candidates = match[1]
+      .split(/\s*(?:;|:)\s*|\s+(?:and|&)\s+|,\s*/)
+      .map((candidate) => candidate
+        .replace(/^.*\bwith\s+/i, '')
+        .replace(/^(?:a|an|the|novel|advanced|basic|strong|various)\s+/i, '')
+        .replace(/\s+(?:for|to|on|during|while|in|in order to)\b.*$/i, '')
+        .trim()
+      )
+      .filter((candidate) => candidate && isValidSkillCandidate(candidate))
+
+    candidates.forEach((candidate) => addSkill(candidate, 'Skills', {
+      source: sourceType,
+      section,
+      text: evidenceText,
+    }))
+  }
 }
 
 function extractSkills(text, sections) {
-  const combinedText = [text, ...(sections.skills || [])].join(' ')
   const detectedSkills = new Map()
+  const categories = new Map()
+  const provenance = new Map()
 
-  const addSkill = (candidate) => {
+  const addSkill = (candidate, category = 'Skills', origin = null) => {
     const normalized = normalizeSkillLabel(candidate)
     if (!normalized) return
 
     const dedupeKey = normalized.toLowerCase()
     if (!detectedSkills.has(dedupeKey)) {
       detectedSkills.set(dedupeKey, normalized)
+      categories.set(dedupeKey, category)
+    } else if (categories.get(dedupeKey) === 'Skills' && category !== 'Skills') {
+      categories.set(dedupeKey, category)
     }
-  }
 
-  for (const skillDefinition of SKILL_DICTIONARY) {
-    for (const synonym of skillDefinition.synonyms) {
-      const escaped = synonym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')
-      const regex = new RegExp(`\\b${escaped}(?:s)?\\b`, 'i')
-      if (regex.test(combinedText)) {
-        addSkill(skillDefinition.canonical)
+    if (origin) {
+      const records = provenance.get(dedupeKey) || []
+      const record = {
+        source: origin.source,
+        section: origin.section,
+        text: origin.text,
       }
+      if (!records.some((item) => item.source === record.source && item.section === record.section && item.text === record.text)) {
+        records.push(record)
+      }
+      provenance.set(dedupeKey, records)
     }
   }
 
   for (const line of sections.skills || []) {
-    const cleanedLine = stripSkillLabel(line)
-    const fragments = splitSkillLine(cleanedLine)
+    const { category, value } = splitSkillLabel(line)
+    const source = /(?:currently|currently being|in the process of|learning|learn)\b/i.test(category)
+      ? 'currently_learning'
+      : 'explicit_skill'
+    splitSkillLine(value)
       .map((item) => cleanEdgePunctuation(item.replace(/^[\u2022•\-–—]\s*/, '')))
       .filter(Boolean)
-
-    for (const fragment of fragments) {
-      if (!isValidSkillCandidate(fragment)) {
-        continue
-      }
-
-      addSkill(fragment)
-    }
+      .filter(isValidSkillCandidate)
+      .forEach((candidate) => addSkill(candidate, category, {
+        source,
+        section: 'skills',
+        text: line,
+      }))
   }
 
+  const contextualSections = [
+    ['projects', sections.projects || [], 'project'],
+    ['experience', sections.experience || [], 'experience'],
+    ['laboratoryExperience', sections.laboratoryExperience || [], 'experience'],
+  ]
+
+  contextualSections.forEach(([section, entries, source]) => {
+    entries.forEach((entry) => addContextualSkills(entry, source, section, addSkill))
+  })
+
   const normalizedSkills = Array.from(detectedSkills.values())
-  const categorizedSkills = createEmptySkillCategories()
+  const categorizedSkills = {}
 
   for (const skill of normalizedSkills) {
-    const category = getSkillCategory(skill)
+    const category = categories.get(skill.toLowerCase()) || 'Skills'
+    if (!categorizedSkills[category]) categorizedSkills[category] = []
     categorizedSkills[category].push(skill)
   }
 
   return {
     list: normalizedSkills,
     categories: categorizedSkills,
+    provenance: Object.fromEntries(
+      normalizedSkills.map((skill) => [skill, provenance.get(skill.toLowerCase()) || []])
+    ),
     rawCount: detectedSkills.size,
     duplicateCount: Math.max(0, (sections.skills || []).length - normalizedSkills.length),
   }
@@ -638,6 +637,7 @@ function parseResumeText(text, embeddedUrls = []) {
     summary: sections.summary.join(' '),
     skills: skills.list,
     skillCategories: skills.categories,
+    skillProvenance: skills.provenance,
     education: splitIntoEntries(sections.education),
     experience: splitIntoEntries(sections.experience),
     projects: splitIntoEntries(sections.projects),

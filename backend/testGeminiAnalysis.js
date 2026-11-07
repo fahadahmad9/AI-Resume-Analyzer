@@ -72,9 +72,8 @@ async function runTest() {
 
   try {
     console.log('Calling analyzeResumeWithGemini...');
-    const result = await analyzeResumeWithGemini(sampleResume);
+    await analyzeResumeWithGemini(sampleResume);
     console.log('Gemini response received.');
-    console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     console.error('Gemini resume analysis test failed:', error);
     process.exitCode = 1;

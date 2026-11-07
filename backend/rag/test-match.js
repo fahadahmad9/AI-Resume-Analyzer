@@ -16,19 +16,26 @@ Applicants must hold a history degree and have medieval European history experti
 `;
 
 async function runTest() {
-  const { resumeId } = await ingestResume({
+  const { internalId } = await ingestResume({
     filename: 'match-test-resume.json',
     rawText: JSON.stringify(sample),
     parsed: sample,
   });
 
   try {
-    const result = await matchResumeToJob(resumeId, jobDescription);
+    const result = await matchResumeToJob(internalId, jobDescription);
     console.log('Match score:', result.score, 'threshold:', result.threshold);
-    console.log('Matched:', result.matched);
-    console.log('Missing:', result.missing);
+    for (const item of [...result.matched, ...result.missing]) {
+      const evidence = item.evidenceTop3 || [];
+      console.log(
+        `${item.requirement}: ${evidence.map((candidate) => (
+          `${Math.round(Number(candidate.similarity) * 100)}%`
+        )).join(', ')}`,
+      );
+    }
+    console.log('Not assessed:', result.notAssessed);
   } finally {
-    await pool.query('DELETE FROM resumes WHERE id = $1', [resumeId]);
+    await pool.query('DELETE FROM resumes WHERE id = $1', [internalId]);
   }
 }
 
