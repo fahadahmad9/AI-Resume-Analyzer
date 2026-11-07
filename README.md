@@ -4,6 +4,8 @@ An AI-powered tool that reads a resume, scores it, and tells you how well it fit
 
 Upload a PDF. Get a structured breakdown, a quality score and an AI review. Then paste a job description and see exactly which requirements your resume covers, which it doesn't, and where in your resume the proof lives.
 
+[Try the live application](https://ai-resume-analyzer-tan-zeta-8sw4de8axm.vercel.app/)
+
 ## The problem
 
 Job seekers send resumes into a black box.
@@ -87,7 +89,7 @@ RAG (retrieval-augmented generation) powers the job-matching feature. The idea i
 - [ ] Fall back across Gemini models when one is overloaded
 - [ ] Show parsed results instantly and load the AI review progressively
 - [ ] Authentication and resume history
-- [ ] Deployment
+- [x] Deployment
 
 ## Author
 
