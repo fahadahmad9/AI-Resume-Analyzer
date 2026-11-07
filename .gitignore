@@ -46,3 +46,4 @@ env/
 # Uploads / temp files (important for your project)
 uploads/
 temp/
+.neon
